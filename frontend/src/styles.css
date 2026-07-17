@@ -1,0 +1,8 @@
+* { box-sizing: border-box; }
+html, body, #root { min-height: 100%; margin: 0; }
+body { min-width: 320px; }
+a { color: inherit; text-decoration: none; }
+::selection { background: #b9dfd0; }
+.login-pattern { position: relative; overflow: hidden; }
+.login-pattern::before { content: ''; position: absolute; inset: 0; opacity: .13; background-image: radial-gradient(circle at 1px 1px, #fff 1px, transparent 0); background-size: 24px 24px; }
+
