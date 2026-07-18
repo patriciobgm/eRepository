@@ -1,5 +1,5 @@
 from django.contrib import admin
-from repository.models import AuditLog, Document, DocumentVersion, Repository
+from repository.models import AuditLog, Document, DocumentVersion, Folder, Notification, Repository
 
 
 class DocumentVersionInline(admin.TabularInline):
@@ -23,6 +23,13 @@ class RepositoryAdmin(admin.ModelAdmin):
     filter_horizontal = ("members",)
 
 
+@admin.register(Folder)
+class FolderAdmin(admin.ModelAdmin):
+    list_display = ("name", "repository", "owner", "created_at")
+    list_filter = ("repository__kind", "created_at")
+    search_fields = ("name", "repository__name", "owner__email")
+
+
 @admin.register(AuditLog)
 class AuditLogAdmin(admin.ModelAdmin):
     list_display = ("created_at", "actor", "action", "target_type", "target_name", "ip_address")
@@ -35,3 +42,16 @@ class AuditLogAdmin(admin.ModelAdmin):
     def has_change_permission(self, request, obj=None):
         return False
 
+
+@admin.register(Notification)
+class NotificationAdmin(admin.ModelAdmin):
+    list_display = ("created_at", "recipient", "category", "title", "read_at")
+    list_filter = ("category", "read_at", "created_at")
+    search_fields = ("recipient__email", "recipient__first_name", "recipient__last_name", "title", "message")
+    readonly_fields = tuple(field.name for field in Notification._meta.fields)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

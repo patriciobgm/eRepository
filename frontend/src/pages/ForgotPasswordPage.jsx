@@ -1,0 +1,11 @@
+import { useState } from 'react'
+import { ArrowBackRounded, MarkEmailReadOutlined, PasswordRounded } from '@mui/icons-material'
+import { Alert, Box, Button, Card, CardContent, Stack, TextField, Typography } from '@mui/material'
+import { Link } from 'react-router-dom'
+import api, { errorMessage } from '../api/client'
+
+export default function ForgotPasswordPage() {
+  const [email, setEmail] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [sent, setSent] = useState(false)
+  const submit = async (event) => { event.preventDefault(); setBusy(true); setError(''); try { await api.post('/auth/password-reset/', { email }); setSent(true) } catch (err) { setError(errorMessage(err)) } finally { setBusy(false) } }
+  return <Box minHeight="100vh" bgcolor="background.default" display="grid" sx={{ placeItems: 'center' }} p={2}><Card sx={{ width: '100%', maxWidth: 480 }}><CardContent sx={{ p: { xs: 3, sm: 5 } }}><Box width={52} height={52} borderRadius={3} bgcolor="primary.light" color="primary.dark" display="grid" sx={{ placeItems: 'center' }} mb={2}>{sent ? <MarkEmailReadOutlined /> : <PasswordRounded />}</Box><Typography variant="h4">{sent ? 'Check your email' : 'Forgot your password?'}</Typography><Typography color="text.secondary" mt={1} mb={3}>{sent ? 'If the account exists, we sent the correct recovery instructions. Google-only accounts receive a reminder to use Continue with Google.' : 'Enter your account email and we’ll send secure instructions. We’ll also recognize accounts that use Google sign-in.'}</Typography>{error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}{sent ? <Button component={Link} to="/login" variant="contained" startIcon={<ArrowBackRounded />}>Return to sign in</Button> : <Box component="form" onSubmit={submit}><Stack spacing={2}><TextField label="Account email" type="email" autoFocus required fullWidth value={email} onChange={(event) => setEmail(event.target.value)} /><Button type="submit" size="large" variant="contained" disabled={busy}>{busy ? 'Sending…' : 'Send recovery instructions'}</Button><Button component={Link} to="/login" startIcon={<ArrowBackRounded />}>Back to sign in</Button></Stack></Box>}</CardContent></Card></Box>
+}

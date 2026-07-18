@@ -70,6 +70,19 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.IsAuthenticated",),
     "DEFAULT_FILTER_BACKENDS": ("django_filters.rest_framework.DjangoFilterBackend", "rest_framework.filters.SearchFilter", "rest_framework.filters.OrderingFilter"),
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.ScopedRateThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": os.getenv("API_ANON_RATE", "60/hour"),
+        "user": os.getenv("API_USER_RATE", "1000/hour"),
+        "login": os.getenv("API_LOGIN_RATE", "10/minute"),
+        "registration": os.getenv("API_REGISTRATION_RATE", "5/hour"),
+        "google_auth": os.getenv("API_GOOGLE_AUTH_RATE", "10/minute"),
+        "password_reset": os.getenv("API_PASSWORD_RESET_RATE", "5/hour"),
+    },
     "PAGE_SIZE": 20,
 }
 SIMPLE_JWT = {
@@ -81,6 +94,7 @@ SIMPLE_JWT = {
 EMAIL_BACKEND = os.getenv("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "eRepository <noreply@school.local>")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
 FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
 DATA_UPLOAD_MAX_MEMORY_SIZE = 55 * 1024 * 1024
 MAX_DOCUMENT_SIZE = int(os.getenv("MAX_DOCUMENT_SIZE", 50 * 1024 * 1024))

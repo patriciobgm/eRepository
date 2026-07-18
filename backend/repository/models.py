@@ -5,6 +5,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.db import models
+from django.db.models.functions import Lower
 
 
 def document_upload_path(instance, filename):
@@ -33,8 +34,24 @@ class Repository(models.Model):
         return self.name
 
 
+class Folder(models.Model):
+    repository = models.ForeignKey(Repository, on_delete=models.CASCADE, related_name="folders")
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="owned_folders")
+    name = models.CharField(max_length=180)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("name",)
+        constraints = [models.UniqueConstraint(Lower("name"), "repository", name="unique_folder_name_per_repository")]
+
+    def __str__(self):
+        return self.name
+
+
 class Document(models.Model):
     repository = models.ForeignKey(Repository, on_delete=models.CASCADE, related_name="documents")
+    folder = models.ForeignKey(Folder, on_delete=models.SET_NULL, related_name="documents", null=True, blank=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="documents")
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
@@ -106,3 +123,30 @@ class AuditLog(models.Model):
     class Meta:
         ordering = ("-created_at",)
 
+
+class Notification(models.Model):
+    class Category(models.TextChoices):
+        ACCOUNT = "ACCOUNT", "Account"
+        REPOSITORY = "REPOSITORY", "Repository"
+        DOCUMENT = "DOCUMENT", "Document"
+        SYSTEM = "SYSTEM", "System"
+
+    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications")
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="triggered_notifications")
+    category = models.CharField(max_length=20, choices=Category.choices, default=Category.SYSTEM)
+    title = models.CharField(max_length=180)
+    message = models.CharField(max_length=500)
+    link = models.CharField(max_length=255, blank=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+        indexes = [models.Index(fields=("recipient", "read_at", "-created_at"), name="notification_inbox_idx")]
+
+    @property
+    def is_read(self):
+        return self.read_at is not None
+
+    def __str__(self):
+        return self.title

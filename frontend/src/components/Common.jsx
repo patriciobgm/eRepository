@@ -13,5 +13,5 @@ export const initials = (user) => `${user?.first_name?.[0] || ''}${user?.last_na
 export function UserAvatar({ user, size = 36 }) { return <Avatar src={user?.avatar_url} sx={{ width: size, height: size, bgcolor: 'primary.main', fontSize: size * .36 }}>{initials(user)}</Avatar> }
 export const formatBytes = (bytes = 0) => { if (!bytes) return '0 B'; const units = ['B', 'KB', 'MB', 'GB']; const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1); return `${(bytes / (1024 ** i)).toFixed(i ? 1 : 0)} ${units[i]}` }
 export const formatDate = (date) => dayjs(date).format('MMM D, YYYY · h:mm A')
+export const roleLabel = (role) => role === 'ASSISTANT_PRINCIPAL' ? 'Principal' : role?.replaceAll('_', ' ')
 export function FileTypeChip({ filename = '' }) { const ext = filename.split('.').pop()?.toUpperCase() || 'FILE'; return <Chip icon={<InsertDriveFileOutlined />} size="small" label={ext} variant="outlined" sx={{ fontWeight: 700 }} /> }
-

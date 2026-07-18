@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import api from '../api/client'
 
 const AuthContext = createContext(null)
@@ -16,14 +16,21 @@ export function AuthProvider({ children }) {
     if (localStorage.getItem('accessToken')) refreshProfile().catch(() => setUser(null)).finally(() => setLoading(false))
   }, [refreshProfile])
 
-  const login = async (credentials) => {
-    const { data } = await api.post('/auth/login/', credentials)
+  const storeSession = (data) => {
     localStorage.setItem('accessToken', data.access); localStorage.setItem('refreshToken', data.refresh); localStorage.setItem('user', JSON.stringify(data.user)); setUser(data.user)
   }
+  const login = async (credentials) => {
+    const { data } = await api.post('/auth/login/', credentials)
+    storeSession(data)
+  }
+  const googleAuth = async (payload) => {
+    const { data } = await api.post('/auth/google/', payload)
+    if (data.access) storeSession(data)
+    return data
+  }
   const logout = () => { localStorage.removeItem('accessToken'); localStorage.removeItem('refreshToken'); localStorage.removeItem('user'); setUser(null) }
-  const value = useMemo(() => ({ user, setUser, login, logout, loading, refreshProfile, isAdmin: user?.role === 'ASSISTANT_PRINCIPAL' }), [user, loading, refreshProfile])
+  const value = { user, setUser, login, googleAuth, logout, loading, refreshProfile, isAdmin: user?.role === 'ASSISTANT_PRINCIPAL' || user?.is_superuser, isSuperadmin: Boolean(user?.is_superuser), canManageRepositories: user?.role === 'ASSISTANT_PRINCIPAL' && !user?.is_superuser }
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
 export const useAuth = () => useContext(AuthContext)
-

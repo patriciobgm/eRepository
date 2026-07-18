@@ -1,0 +1,11 @@
+import { useState } from 'react'
+import { LockResetRounded } from '@mui/icons-material'
+import { Alert, Box, Button, Card, CardContent, Stack, TextField, Typography } from '@mui/material'
+import { Link, useParams } from 'react-router-dom'
+import api, { errorMessage } from '../api/client'
+
+export default function ResetPasswordPage() {
+  const { uid, token } = useParams(); const [form, setForm] = useState({ password: '', confirm: '' }); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [done, setDone] = useState(false)
+  const submit = async (event) => { event.preventDefault(); if (form.password !== form.confirm) return setError('Passwords do not match.'); setBusy(true); setError(''); try { await api.post(`/auth/password-reset/${uid}/${token}/`, { password: form.password }); setDone(true) } catch (err) { setError(errorMessage(err)) } finally { setBusy(false) } }
+  return <Box minHeight="100vh" bgcolor="background.default" display="grid" sx={{ placeItems: 'center' }} p={2}><Card sx={{ width: '100%', maxWidth: 480 }}><CardContent sx={{ p: { xs: 3, sm: 5 } }}><Box width={52} height={52} borderRadius={3} bgcolor="primary.light" color="primary.dark" display="grid" sx={{ placeItems: 'center' }} mb={2}><LockResetRounded /></Box><Typography variant="h4">Create a new password</Typography><Typography color="text.secondary" mt={1} mb={3}>Choose a strong password you do not use elsewhere.</Typography>{error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}{done ? <><Alert severity="success" sx={{ mb: 2 }}>Password reset successfully.</Alert><Button component={Link} to="/login" variant="contained">Continue to sign in</Button></> : <Box component="form" onSubmit={submit}><Stack spacing={2}><TextField label="New password" type="password" required value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /><TextField label="Confirm new password" type="password" required value={form.confirm} onChange={(event) => setForm({ ...form, confirm: event.target.value })} /><Button type="submit" variant="contained" size="large" disabled={busy}>{busy ? 'Updating…' : 'Reset password'}</Button></Stack></Box>}</CardContent></Card></Box>
+}

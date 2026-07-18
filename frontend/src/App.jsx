@@ -9,6 +9,8 @@ import ProfilePage from './pages/ProfilePage'
 import RepositoriesPage from './pages/RepositoriesPage'
 import RegisterPage from './pages/RegisterPage'
 import StaffPage from './pages/StaffPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 
 function Protected({ children, admin = false }) {
   const { user, loading, isAdmin } = useAuth()
@@ -23,6 +25,8 @@ export default function App() {
   return <Routes>
     <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
     <Route path="/register" element={user ? <Navigate to="/" replace /> : <RegisterPage />} />
+    <Route path="/forgot-password" element={user ? <Navigate to="/" replace /> : <ForgotPasswordPage />} />
+    <Route path="/reset-password/:uid/:token" element={user ? <Navigate to="/" replace /> : <ResetPasswordPage />} />
     <Route element={<Protected><AppLayout /></Protected>}>
       <Route index element={<DashboardPage />} />
       <Route path="repositories" element={<RepositoriesPage />} />

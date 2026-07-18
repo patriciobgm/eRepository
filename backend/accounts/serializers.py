@@ -4,6 +4,7 @@ from io import BytesIO
 
 import pyotp
 import qrcode
+from django.conf import settings
 from django.contrib.auth import authenticate, password_validation
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -13,17 +14,79 @@ from django.utils.http import urlsafe_base64_encode
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from accounts.models import User
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
+
+from accounts.models import Department, Position, User
+
+
+def unique_username(email):
+    base = email.split("@")[0][:120]
+    username = base
+    index = 1
+    while User.objects.filter(username=username).exists():
+        index += 1
+        username = f"{base}{index}"
+    return username
+
+
+def token_response(user, context):
+    refresh = RefreshToken.for_user(user)
+    return {"access": str(refresh.access_token), "refresh": str(refresh), "user": UserSerializer(user, context=context).data}
+
+
+class DepartmentSerializer(serializers.ModelSerializer):
+    user_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Department
+        fields = ("id", "name", "is_active", "user_count", "created_at", "updated_at")
+        read_only_fields = ("id", "user_count", "created_at", "updated_at")
+
+    def validate_name(self, value):
+        queryset = Department.objects.filter(name__iexact=value.strip())
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError("A department with this name already exists.")
+        return value.strip()
+
+
+class PositionSerializer(serializers.ModelSerializer):
+    user_count = serializers.IntegerField(read_only=True)
+    role_label = serializers.CharField(source="get_role_display", read_only=True)
+
+    class Meta:
+        model = Position
+        fields = ("id", "name", "role", "role_label", "is_active", "user_count", "created_at", "updated_at")
+        read_only_fields = ("id", "role_label", "user_count", "created_at", "updated_at")
+
+    def validate(self, attrs):
+        name = attrs.get("name", getattr(self.instance, "name", "")).strip()
+        role = attrs.get("role", getattr(self.instance, "role", None))
+        queryset = Position.objects.filter(name__iexact=name, role=role)
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError({"name": "This position already exists for the selected role."})
+        attrs["name"] = name
+        return attrs
 
 
 class UserSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     avatar_url = serializers.SerializerMethodField()
+    department = serializers.CharField(source="department.name", read_only=True, allow_null=True)
+    department_id = serializers.PrimaryKeyRelatedField(source="department", queryset=Department.objects.all(), required=False, allow_null=True)
+    position = serializers.CharField(source="position.name", read_only=True, allow_null=True)
+    position_id = serializers.PrimaryKeyRelatedField(source="position", queryset=Position.objects.all(), required=False, allow_null=True)
+    role_label = serializers.CharField(source="get_role_display", read_only=True)
+    has_usable_password = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ("id", "username", "email", "first_name", "last_name", "full_name", "role", "employee_id", "department", "position", "bio", "phone", "avatar", "avatar_url", "two_factor_enabled", "is_active", "date_joined")
-        read_only_fields = ("id", "username", "role", "employee_id", "two_factor_enabled", "is_active", "date_joined", "avatar_url")
+        fields = ("id", "username", "email", "first_name", "last_name", "full_name", "role", "role_label", "employee_id", "department", "department_id", "position", "position_id", "bio", "mobile", "avatar", "avatar_url", "two_factor_enabled", "auth_provider", "has_usable_password", "is_active", "is_superuser", "date_joined")
+        read_only_fields = ("id", "username", "role", "role_label", "employee_id", "department", "position", "two_factor_enabled", "auth_provider", "has_usable_password", "is_active", "is_superuser", "date_joined", "avatar_url")
 
     def get_full_name(self, obj):
         return obj.get_full_name() or obj.username
@@ -34,19 +97,37 @@ class UserSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         return request.build_absolute_uri(obj.avatar.url) if request else obj.avatar.url
 
+    def get_has_usable_password(self, obj):
+        return obj.has_usable_password()
+
+    def validate(self, attrs):
+        role = attrs.get("role", getattr(self.instance, "role", None))
+        position = attrs.get("position", getattr(self.instance, "position", None))
+        if position and position.role != role:
+            raise serializers.ValidationError({"position_id": "Select a position assigned to this role."})
+        if attrs.get("is_superuser", getattr(self.instance, "is_superuser", False)):
+            attrs["position"] = None
+        if role == User.Role.ASSISTANT_PRINCIPAL:
+            admin_department = Department.objects.filter(name__iexact="Admin").first()
+            if admin_department:
+                attrs["department"] = admin_department
+        return attrs
+
 
 class StaffUserSerializer(UserSerializer):
     password = serializers.CharField(write_only=True, required=False, min_length=8)
 
     class Meta(UserSerializer.Meta):
         fields = UserSerializer.Meta.fields + ("password",)
-        read_only_fields = ("id", "date_joined", "two_factor_enabled", "avatar_url")
+        read_only_fields = ("id", "department", "position", "role_label", "date_joined", "two_factor_enabled", "auth_provider", "has_usable_password", "avatar_url")
 
     def validate_employee_id(self, value):
         return value or None
 
     def create(self, validated_data):
         password = validated_data.pop("password", None) or secrets.token_urlsafe(12)
+        if validated_data.get("is_superuser"):
+            validated_data["is_staff"] = True
         user = User(**validated_data)
         user.set_password(password)
         user.save()
@@ -54,6 +135,8 @@ class StaffUserSerializer(UserSerializer):
 
     def update(self, instance, validated_data):
         password = validated_data.pop("password", None)
+        if "is_superuser" in validated_data:
+            validated_data["is_staff"] = validated_data["is_superuser"]
         instance = super().update(instance, validated_data)
         if password:
             instance.set_password(password)
@@ -79,17 +162,18 @@ class LoginSerializer(serializers.Serializer):
                 raise serializers.ValidationError({"otp": "A verification code is required.", "requires_otp": True})
             if not user.verify_otp(attrs["otp"]):
                 raise serializers.ValidationError({"otp": "The verification code is invalid."})
-        refresh = RefreshToken.for_user(user)
-        return {"access": str(refresh.access_token), "refresh": str(refresh), "user": UserSerializer(user, context=self.context).data}
+        return token_response(user, self.context)
 
 
 class RegistrationSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, min_length=8)
     password_confirm = serializers.CharField(write_only=True)
+    department_id = serializers.PrimaryKeyRelatedField(source="department", queryset=Department.objects.filter(is_active=True))
+    position_id = serializers.PrimaryKeyRelatedField(source="position", queryset=Position.objects.filter(is_active=True))
 
     class Meta:
         model = User
-        fields = ("first_name", "last_name", "email", "employee_id", "department", "position", "role", "password", "password_confirm")
+        fields = ("first_name", "last_name", "email", "employee_id", "department_id", "position_id", "role", "password", "password_confirm")
         extra_kwargs = {"employee_id": {"required": True, "allow_blank": False}}
 
     def validate_role(self, value):
@@ -104,21 +188,98 @@ class RegistrationSerializer(serializers.ModelSerializer):
             password_validation.validate_password(attrs["password"])
         except DjangoValidationError as exc:
             raise serializers.ValidationError({"password": list(exc.messages)})
+        if attrs["position"].role != attrs["role"]:
+            raise serializers.ValidationError({"position_id": "Select a position assigned to this role."})
         return attrs
 
     def create(self, validated_data):
         password = validated_data.pop("password")
         email = validated_data["email"].lower()
-        base = email.split("@")[0][:120]
-        username = base
-        index = 1
-        while User.objects.filter(username=username).exists():
-            index += 1
-            username = f"{base}{index}"
-        user = User(username=username, email=email, is_active=False, **{k: v for k, v in validated_data.items() if k != "email"})
+        user = User(username=unique_username(email), email=email, is_active=False, **{k: v for k, v in validated_data.items() if k != "email"})
         user.set_password(password)
         user.save()
+        from repository.models import Notification
+        from repository.services import management_recipients, notify_users
+        notify_users(
+            management_recipients(),
+            category=Notification.Category.ACCOUNT,
+            title="New registration awaiting approval",
+            message=f"{user.get_full_name() or user.email} submitted a faculty account application.",
+            actor=user,
+            link="/staff",
+        )
         return user
+
+
+class GoogleAuthSerializer(serializers.Serializer):
+    credential = serializers.CharField(write_only=True)
+    mode = serializers.ChoiceField(choices=("login", "register"), default="login")
+    employee_id = serializers.CharField(required=False, allow_blank=True)
+    department_id = serializers.PrimaryKeyRelatedField(source="department", queryset=Department.objects.filter(is_active=True), required=False)
+    position_id = serializers.PrimaryKeyRelatedField(source="position", queryset=Position.objects.filter(is_active=True), required=False)
+    role = serializers.ChoiceField(choices=(User.Role.TEACHER, User.Role.MASTER_TEACHER), required=False)
+
+    def validate(self, attrs):
+        if not settings.GOOGLE_OAUTH_CLIENT_ID:
+            raise serializers.ValidationError("Google sign-in is not configured.")
+        try:
+            claims = id_token.verify_oauth2_token(attrs["credential"], google_requests.Request(), settings.GOOGLE_OAUTH_CLIENT_ID)
+        except ValueError:
+            raise serializers.ValidationError("Google could not verify this sign-in. Please try again.")
+        if not claims.get("email_verified") or not claims.get("email"):
+            raise serializers.ValidationError("A verified Google email address is required.")
+        email = claims["email"].lower()
+        if not email.endswith("@gmail.com") and not claims.get("hd"):
+            raise serializers.ValidationError("Use a Gmail or Google Workspace account.")
+        if not claims.get("sub"):
+            raise serializers.ValidationError("Google did not provide a stable account identifier.")
+        attrs["claims"] = claims
+        if attrs["mode"] == "register":
+            required = {"employee_id": attrs.get("employee_id"), "department_id": attrs.get("department"), "position_id": attrs.get("position"), "role": attrs.get("role")}
+            missing = [name for name, value in required.items() if not value]
+            if missing:
+                raise serializers.ValidationError({name: "This field is required for Google registration." for name in missing})
+            if User.objects.filter(employee_id=attrs["employee_id"]).exists():
+                raise serializers.ValidationError({"employee_id": "A faculty account already uses this employee ID."})
+            if attrs["position"].role != attrs["role"]:
+                raise serializers.ValidationError({"position_id": "Select a position assigned to this role."})
+        return attrs
+
+    def save(self):
+        claims = self.validated_data["claims"]
+        email = claims["email"].lower()
+        user = User.objects.filter(google_subject=claims["sub"]).first() or User.objects.filter(email__iexact=email).first()
+        if not user:
+            if self.validated_data["mode"] != "register":
+                raise serializers.ValidationError({"detail": "No faculty account uses this Google email. Register first."})
+            user = User(
+                username=unique_username(email), email=email,
+                first_name=claims.get("given_name", ""), last_name=claims.get("family_name", ""),
+                employee_id=self.validated_data["employee_id"], department=self.validated_data["department"],
+                position=self.validated_data["position"], role=self.validated_data["role"],
+                auth_provider=User.AuthProvider.GOOGLE, google_subject=claims["sub"], is_active=False,
+            )
+            user.set_unusable_password()
+            user.save()
+            from repository.models import Notification
+            from repository.services import management_recipients, notify_users
+            notify_users(
+                management_recipients(),
+                category=Notification.Category.ACCOUNT,
+                title="New Google registration awaiting approval",
+                message=f"{user.get_full_name() or user.email} submitted a faculty account application.",
+                actor=user,
+                link="/staff",
+            )
+            return {"pending_approval": True, "detail": "Google registration submitted. The Principal must approve your account before you can sign in."}
+        if not user.is_active:
+            raise serializers.ValidationError({"detail": "Your faculty account is awaiting Principal approval."})
+        if user.auth_provider == User.AuthProvider.PASSWORD:
+            user.auth_provider = User.AuthProvider.BOTH
+        if not user.google_subject:
+            user.google_subject = claims["sub"]
+        user.save(update_fields=["auth_provider", "google_subject"])
+        return token_response(user, self.context)
 
 
 class ChangePasswordSerializer(serializers.Serializer):
@@ -139,7 +300,7 @@ class ChangePasswordSerializer(serializers.Serializer):
         user = self.context["request"].user
         user.set_password(self.validated_data["new_password"])
         user.save(update_fields=["password"])
-        send_mail("Your eRepository password changed", "Your eRepository password was changed successfully. If this was not you, contact the Assistant Principal immediately.", None, [user.email])
+        send_mail("Your eRepository password changed", "Your eRepository password was changed successfully. If this was not you, contact the Principal immediately.", None, [user.email])
         return user
 
 
@@ -149,6 +310,9 @@ class PasswordResetRequestSerializer(serializers.Serializer):
     def save(self):
         user = User.objects.filter(email__iexact=self.validated_data["email"], is_active=True).first()
         if user:
+            if user.auth_provider == User.AuthProvider.GOOGLE and not user.has_usable_password():
+                send_mail("Use Google to access your eRepository", "This account uses Google sign-in and does not have an eRepository password. Return to the sign-in page and choose Continue with Google.", None, [user.email])
+                return
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
             frontend_url = self.context.get("frontend_url", "http://localhost:5173")

@@ -9,11 +9,14 @@ from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from repository.models import AuditLog, Document, DocumentVersion, Repository
+from accounts.models import Department, Position, User
+from accounts.serializers import UserSerializer
+from repository.models import AuditLog, Document, DocumentVersion, Folder, Notification, Repository
 from repository.permissions import RepositoryAccessPermission
 from repository.serializers import (AuditLogSerializer, DocumentCreateSerializer,
-    DocumentSerializer, DocumentVersionSerializer, RepositorySerializer,
+    DocumentSerializer, DocumentVersionSerializer, FolderSerializer, NotificationSerializer, RepositorySerializer,
     VersionUploadSerializer)
+from repository.services import notify_users, shared_repository_audience
 
 
 def client_ip(request):
@@ -40,21 +43,101 @@ class RepositoryViewSet(viewsets.ModelViewSet):
         return accessible_repositories(self.request.user).select_related("owner").prefetch_related("members").annotate(document_count=Count("documents", filter=Q(documents__is_archived=False))).order_by("kind", "name")
 
     def perform_create(self, serializer):
-        if not self.request.user.is_assistant_principal:
-            raise PermissionDenied("Only the Assistant Principal can create shared repositories.")
+        if not self.request.user.can_manage_repositories:
+            raise PermissionDenied("Only the Principal can create shared repositories.")
         repository = serializer.save(owner=self.request.user, kind=Repository.Kind.SHARED)
         log_event(self.request, AuditLog.Action.CREATED, repository)
+        notify_users(
+            shared_repository_audience(repository),
+            category=Notification.Category.REPOSITORY,
+            title="Shared repository available",
+            message=f"You can now access {repository.name}.",
+            actor=self.request.user,
+            link="/repositories",
+        )
 
     def perform_update(self, serializer):
-        if not self.request.user.is_assistant_principal:
-            raise PermissionDenied("Only the Assistant Principal can update repositories.")
+        if not self.request.user.can_manage_repositories or serializer.instance.kind != Repository.Kind.SHARED:
+            raise PermissionDenied("Only the Principal can update shared repositories.")
+        previous_audience = set(shared_repository_audience(serializer.instance).values_list("pk", flat=True))
         repository = serializer.save()
         log_event(self.request, AuditLog.Action.UPDATED, repository)
+        current_audience = set(shared_repository_audience(repository).values_list("pk", flat=True))
+        added = current_audience - previous_audience
+        removed = previous_audience - current_audience
+        retained = current_audience & previous_audience
+        notify_users(added, category=Notification.Category.REPOSITORY, title="Repository access granted", message=f"You can now access {repository.name}.", actor=self.request.user, link="/repositories")
+        notify_users(removed, category=Notification.Category.REPOSITORY, title="Repository access removed", message=f"Your access to {repository.name} was removed.", actor=self.request.user)
+        notify_users(retained, category=Notification.Category.REPOSITORY, title="Shared repository updated", message=f"{repository.name} details or audience were updated.", actor=self.request.user, link="/repositories")
+
+    @action(detail=False, methods=["get"], url_path="eligible-members")
+    def eligible_members(self, request):
+        if not request.user.can_manage_repositories:
+            raise PermissionDenied("Only the Principal can select shared repository members.")
+        members = User.objects.filter(
+            is_active=True,
+            is_superuser=False,
+            role__in=(User.Role.TEACHER, User.Role.MASTER_TEACHER),
+        ).select_related("department", "position").order_by("last_name", "first_name", "username")
+        return Response(UserSerializer(members, many=True, context={"request": request}).data)
 
     def perform_destroy(self, instance):
-        if not self.request.user.is_assistant_principal or instance.kind == Repository.Kind.PRIVATE:
-            raise PermissionDenied("Private repositories cannot be deleted; only the Assistant Principal can delete shared repositories.")
+        if not self.request.user.can_manage_repositories or instance.kind == Repository.Kind.PRIVATE:
+            raise PermissionDenied("Private repositories cannot be deleted; only the Principal can delete shared repositories.")
         log_event(self.request, AuditLog.Action.DELETED, instance)
+        instance.delete()
+
+
+class FolderViewSet(viewsets.ModelViewSet):
+    serializer_class = FolderSerializer
+    pagination_class = None
+    search_fields = ("name", "owner__first_name", "owner__last_name")
+    filterset_fields = ("repository", "owner")
+    ordering_fields = ("name", "created_at", "updated_at")
+
+    def get_queryset(self):
+        return Folder.objects.filter(repository__in=accessible_repositories(self.request.user)).select_related(
+            "repository", "owner", "owner__department", "owner__position"
+        ).annotate(document_count=Count("documents", filter=Q(documents__is_archived=False))).order_by("name")
+
+    def _can_manage(self, folder):
+        user = self.request.user
+        return not user.is_superuser and (
+            folder.owner_id == user.pk
+            or (user.can_manage_repositories and folder.repository.kind == Repository.Kind.SHARED)
+        )
+
+    def perform_create(self, serializer):
+        repository = serializer.validated_data["repository"]
+        user = self.request.user
+        if user.is_superuser:
+            raise PermissionDenied("Superadmins have read-only repository access and cannot create folders.")
+        if repository.kind == Repository.Kind.PRIVATE and repository.owner_id != user.pk:
+            raise PermissionDenied("You can only create folders in your own private repository.")
+        if repository.kind == Repository.Kind.SHARED and not accessible_repositories(user).filter(pk=repository.pk).exists():
+            raise PermissionDenied("You do not have access to this shared repository.")
+        folder = serializer.save(owner=user)
+        log_event(self.request, AuditLog.Action.CREATED, folder, {"repository": repository.name})
+        if repository.kind == Repository.Kind.SHARED:
+            notify_users(
+                shared_repository_audience(repository),
+                category=Notification.Category.REPOSITORY,
+                title="New shared folder",
+                message=f"{user.get_full_name() or user.username} created the {folder.name} folder in {repository.name}.",
+                actor=user,
+                link="/repositories",
+            )
+
+    def perform_update(self, serializer):
+        if not self._can_manage(serializer.instance):
+            raise PermissionDenied("Only the folder owner or Principal can update this folder.")
+        folder = serializer.save()
+        log_event(self.request, AuditLog.Action.UPDATED, folder, {"repository": folder.repository.name})
+
+    def perform_destroy(self, instance):
+        if not self._can_manage(instance):
+            raise PermissionDenied("Only the folder owner or Principal can remove this folder.")
+        log_event(self.request, AuditLog.Action.DELETED, instance, {"repository": instance.repository.name, "documents_moved_to_root": instance.documents.count()})
         instance.delete()
 
 
@@ -66,17 +149,28 @@ class DocumentViewSet(viewsets.ModelViewSet):
     ordering_fields = ("title", "created_at", "updated_at")
 
     def get_queryset(self):
-        return Document.objects.filter(repository__in=accessible_repositories(self.request.user)).select_related("owner", "repository").prefetch_related("versions__uploaded_by").annotate(version_count=Count("versions")).distinct().order_by("-updated_at")
+        return Document.objects.filter(repository__in=accessible_repositories(self.request.user)).select_related("owner", "repository", "folder", "folder__owner").prefetch_related("versions__uploaded_by").annotate(version_count=Count("versions")).distinct().order_by("-updated_at")
 
     def get_serializer_class(self):
         return DocumentCreateSerializer if self.action == "create" else DocumentSerializer
 
     def perform_create(self, serializer):
+        if self.request.user.is_superuser:
+            raise PermissionDenied("Superadmins have read-only repository access and cannot upload documents.")
         repository = serializer.validated_data["repository"]
         if not accessible_repositories(self.request.user).filter(pk=repository.pk).exists():
             raise PermissionDenied("You do not have access to this repository.")
         document = serializer.save()
         log_event(self.request, AuditLog.Action.CREATED, document, {"repository": repository.name})
+        if repository.kind == Repository.Kind.SHARED:
+            notify_users(
+                shared_repository_audience(repository),
+                category=Notification.Category.DOCUMENT,
+                title="New shared document",
+                message=f"{self.request.user.get_full_name() or self.request.user.username} uploaded {document.title} to {repository.name}.",
+                actor=self.request.user,
+                link="/repositories",
+            )
 
     def perform_update(self, serializer):
         document = self.get_object()
@@ -103,6 +197,15 @@ class DocumentViewSet(viewsets.ModelViewSet):
         version = serializer.save()
         document.save(update_fields=["updated_at"])
         log_event(request, AuditLog.Action.UPLOADED_VERSION, document, {"version": version.version_number, "filename": version.original_filename})
+        if document.repository.kind == Repository.Kind.SHARED:
+            notify_users(
+                shared_repository_audience(document.repository),
+                category=Notification.Category.DOCUMENT,
+                title="New document revision",
+                message=f"{request.user.get_full_name() or request.user.username} uploaded version {version.version_number} of {document.title}.",
+                actor=request.user,
+                link="/repositories",
+            )
         return Response(DocumentVersionSerializer(version, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"])
@@ -139,6 +242,35 @@ class AuditLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets
         return queryset.filter(Q(actor=self.request.user) | Q(target_type="Document", target_id__in=self.request.user.documents.values("id")))
 
 
+class NotificationViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):
+    serializer_class = NotificationSerializer
+
+    def get_queryset(self):
+        return Notification.objects.filter(recipient=self.request.user).select_related("actor")
+
+    @action(detail=False, methods=["get"], url_path="unread-count")
+    def unread_count(self, request):
+        return Response({"count": self.get_queryset().filter(read_at__isnull=True).count()})
+
+    @action(detail=True, methods=["post"], url_path="read")
+    def mark_read(self, request, pk=None):
+        notification = self.get_object()
+        if notification.read_at is None:
+            notification.read_at = timezone.now()
+            notification.save(update_fields=["read_at"])
+        return Response(self.get_serializer(notification).data)
+
+    @action(detail=False, methods=["post"], url_path="mark-all-read")
+    def mark_all_read(self, request):
+        updated = self.get_queryset().filter(read_at__isnull=True).update(read_at=timezone.now())
+        return Response({"updated": updated})
+
+    @action(detail=False, methods=["delete"], url_path="clear-all")
+    def clear_all(self, request):
+        deleted, _ = self.get_queryset().delete()
+        return Response({"deleted": deleted})
+
+
 class DashboardView(APIView):
     def get(self, request):
         repositories = accessible_repositories(request.user)
@@ -149,8 +281,18 @@ class DashboardView(APIView):
             "documents": documents.count(),
             "my_documents": documents.filter(owner=request.user).count(),
             "storage_bytes": total_bytes,
-            "recent_documents": DocumentSerializer(documents.select_related("owner", "repository").prefetch_related("versions__uploaded_by").annotate(version_count=Count("versions"))[:6], many=True, context={"request": request}).data,
+            "recent_documents": DocumentSerializer(documents.select_related("owner", "repository", "folder", "folder__owner").prefetch_related("versions__uploaded_by").annotate(version_count=Count("versions"))[:6], many=True, context={"request": request}).data,
             "recent_activity": AuditLogSerializer(AuditLog.objects.filter(Q(actor=request.user) | Q(target_id__in=documents.values("id"))).select_related("actor")[:8], many=True).data,
             "generated_at": timezone.now(),
         }
+        if request.user.is_superuser:
+            faculty = User.objects.filter(is_superuser=False)
+            data["management"] = {
+                "faculty_accounts": faculty.count(),
+                "pending_accounts": faculty.filter(is_active=False).count(),
+                "principals": faculty.filter(role=User.Role.ASSISTANT_PRINCIPAL, is_active=True).count(),
+                "departments": Department.objects.filter(is_active=True).count(),
+                "positions": Position.objects.filter(is_active=True).count(),
+            }
+            data["recent_activity"] = AuditLogSerializer(AuditLog.objects.select_related("actor")[:8], many=True).data
         return Response(data)

@@ -1,14 +1,17 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from accounts.views import (ChangePasswordView, LoginView, PasswordResetConfirmView, RegistrationView,
+from accounts.views import (ChangePasswordView, DepartmentViewSet, GoogleAuthView, LoginView, PasswordResetConfirmView, PositionViewSet, RegistrationView,
     PasswordResetRequestView, ProfileView, StaffUserViewSet, TwoFactorSetupView,
     TwoFactorVerifyView)
 
 router = DefaultRouter()
 router.register("users", StaffUserViewSet, basename="users")
+router.register("departments", DepartmentViewSet, basename="departments")
+router.register("positions", PositionViewSet, basename="positions")
 
 urlpatterns = [
     path("login/", LoginView.as_view(), name="login"),
+    path("google/", GoogleAuthView.as_view(), name="google-auth"),
     path("register/", RegistrationView.as_view(), name="register"),
     path("profile/", ProfileView.as_view(), name="profile"),
     path("change-password/", ChangePasswordView.as_view(), name="change-password"),

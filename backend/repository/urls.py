@@ -1,15 +1,16 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from repository.views import AuditLogViewSet, DashboardView, DocumentViewSet, RepositoryViewSet, VersionDownloadView
+from repository.views import AuditLogViewSet, DashboardView, DocumentViewSet, FolderViewSet, NotificationViewSet, RepositoryViewSet, VersionDownloadView
 
 router = DefaultRouter()
 router.register("repositories", RepositoryViewSet, basename="repositories")
 router.register("documents", DocumentViewSet, basename="documents")
+router.register("folders", FolderViewSet, basename="folders")
 router.register("audit-logs", AuditLogViewSet, basename="audit-logs")
+router.register("notifications", NotificationViewSet, basename="notifications")
 
 urlpatterns = [
     path("dashboard/", DashboardView.as_view(), name="dashboard"),
     path("versions/<int:pk>/download/", VersionDownloadView.as_view(), name="version-download"),
     path("", include(router.urls)),
 ]
-
