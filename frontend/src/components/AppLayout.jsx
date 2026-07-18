@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { AccountCircleOutlined, DashboardOutlined, FolderSharedOutlined, HistoryOutlined, LogoutRounded, MenuRounded, PeopleAltOutlined, SchoolRounded } from '@mui/icons-material'
+import { AccountCircleOutlined, DashboardOutlined, FolderSharedOutlined, HistoryOutlined, LogoutRounded, MenuRounded, PeopleAltOutlined } from '@mui/icons-material'
 import { AppBar, Avatar, Box, Chip, Divider, Drawer, IconButton, List, ListItemButton, ListItemIcon, ListItemText, Stack, Toolbar, Tooltip, Typography, useMediaQuery, useTheme } from '@mui/material'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { roleLabel } from './Common'
+import { roleLabel, SchoolLogo } from './Common'
 import NotificationBell from './NotificationBell'
 
 const drawerWidth = 264
@@ -22,7 +22,7 @@ export default function AppLayout() {
   ]
   const drawer = <Box height="100%" display="flex" flexDirection="column" bgcolor="#0D4938" color="white">
     <Stack direction="row" alignItems="center" gap={1.4} px={2.5} height={72}>
-      <Box width={40} height={40} borderRadius={2.5} bgcolor="secondary.main" display="grid" sx={{ placeItems: 'center' }}><SchoolRounded /></Box>
+      <SchoolLogo size={42} />
       <Box><Typography fontWeight={800} lineHeight={1.15}>Faculty eRepository</Typography><Typography variant="caption" sx={{ opacity: .66 }}>JSHS - Senior High School</Typography></Box>
     </Stack>
     <Divider sx={{ borderColor: 'rgba(255,255,255,.1)' }} />

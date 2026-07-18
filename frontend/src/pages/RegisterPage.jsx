@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { ArrowBackRounded, HowToRegOutlined, SchoolRounded } from '@mui/icons-material'
+import { ArrowBackRounded, HowToRegOutlined } from '@mui/icons-material'
 import { Alert, Box, Button, Card, CardContent, Divider, FormControl, InputLabel, MenuItem, Select, Stack, TextField, Typography } from '@mui/material'
 import { Link } from 'react-router-dom'
 import api, { errorMessage } from '../api/client'
 import GoogleAuthButton from '../components/GoogleAuthButton'
+import { SchoolLogo } from '../components/Common'
 import { useAuth } from '../context/AuthContext'
 
 const emptyForm = { first_name: '', last_name: '', email: '', employee_id: '', department_id: '', position_id: '', role: 'TEACHER', password: '', password_confirm: '' }
@@ -21,7 +22,7 @@ export default function RegisterPage() {
     try { const data = await googleAuth({ credential, mode: 'register', employee_id: form.employee_id, department_id: form.department_id, position_id: form.position_id, role: form.role }); setSuccess(data.detail) } catch (err) { setError(errorMessage(err)) } finally { setBusy(false) }
   }
   return <Box minHeight="100vh" bgcolor="background.default" px={2} py={{ xs: 3, md: 6 }}>
-    <Stack direction="row" alignItems="center" justifyContent="center" gap={1.2} mb={3}><Box width={42} height={42} bgcolor="primary.main" color="white" borderRadius={2.5} display="grid" sx={{ placeItems: 'center' }}><SchoolRounded /></Box><Box><Typography fontWeight={800}>Faculty eRepository</Typography><Typography variant="caption" color="text.secondary">Faculty account application</Typography></Box></Stack>
+    <Stack direction="row" alignItems="center" justifyContent="center" gap={1.2} mb={3}><SchoolLogo size={48} /><Box><Typography fontWeight={800}>Faculty eRepository</Typography><Typography variant="caption" color="text.secondary">Faculty account application</Typography></Box></Stack>
     <Card sx={{ maxWidth: 760, mx: 'auto' }}><CardContent sx={{ p: { xs: 3, sm: 5 } }}><Box width={48} height={48} borderRadius={3} bgcolor="primary.light" color="primary.dark" display="grid" sx={{ placeItems: 'center' }} mb={2}><HowToRegOutlined /></Box><Typography variant="h4">Create your account</Typography><Typography color="text.secondary" mt={.75} mb={3}>Submit your school details. The Principal will review and approve your access.</Typography>
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}{success ? <><Alert severity="success" sx={{ mb: 3 }}>{success}</Alert><Button component={Link} to="/login" variant="contained" startIcon={<ArrowBackRounded />}>Return to sign in</Button></> : <Stack spacing={2.5}>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}><TextField label="Employee ID" fullWidth required value={form.employee_id} onChange={change('employee_id')} /><FormControl size="small" fullWidth required><InputLabel>Department</InputLabel><Select label="Department" value={form.department_id} onChange={change('department_id')}>{departments.map((department) => <MenuItem key={department.id} value={department.id}>{department.name}</MenuItem>)}</Select></FormControl></Stack>

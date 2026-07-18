@@ -1,6 +1,11 @@
 import { DescriptionOutlined, InsertDriveFileOutlined } from '@mui/icons-material'
 import { Alert, Avatar, Box, Button, Card, CardContent, Chip, CircularProgress, Stack, Typography } from '@mui/material'
 import dayjs from 'dayjs'
+import jshsLogo from '../assets/jshs-logo.PNG'
+
+export function SchoolLogo({ size = 40 }) {
+  return <Box component="img" src={jshsLogo} alt="Justino Sevilla High School logo" draggable={false} sx={{ width: size, height: size, display: 'block', objectFit: 'contain', flex: '0 0 auto' }} />
+}
 
 export function PageIntro({ eyebrow, title, subtitle, action }) {
   return <Stack direction={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} gap={2} mb={3}><Box><Typography variant="overline" color="primary" fontWeight={800} letterSpacing={1.2}>{eyebrow}</Typography><Typography variant="h4" mt={-.5}>{title}</Typography><Typography color="text.secondary" mt={.5}>{subtitle}</Typography></Box>{action}</Stack>
