@@ -4,7 +4,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -31,7 +31,12 @@ def log_event(request, action, target, details=None):
 def accessible_repositories(user):
     if user.is_assistant_principal:
         return Repository.objects.all()
-    return Repository.objects.filter(Q(kind=Repository.Kind.PRIVATE, owner=user) | Q(kind=Repository.Kind.SHARED, members=user) | Q(kind=Repository.Kind.SHARED, members__isnull=True)).distinct()
+    return Repository.objects.filter(
+        Q(kind=Repository.Kind.PRIVATE, owner=user)
+        | Q(kind=Repository.Kind.SHARED, owner=user)
+        | Q(kind=Repository.Kind.SHARED, members=user)
+        | Q(kind=Repository.Kind.SHARED, members__isnull=True)
+    ).distinct()
 
 
 class RepositoryViewSet(viewsets.ModelViewSet):
@@ -40,11 +45,13 @@ class RepositoryViewSet(viewsets.ModelViewSet):
     search_fields = ("name", "description")
 
     def get_queryset(self):
-        return accessible_repositories(self.request.user).select_related("owner").prefetch_related("members").annotate(document_count=Count("documents", filter=Q(documents__is_archived=False))).order_by("kind", "name")
+        return accessible_repositories(self.request.user).select_related("owner").prefetch_related("members", "owner__designations").annotate(document_count=Count("documents", filter=Q(documents__is_archived=False))).order_by("kind", "name")
 
     def perform_create(self, serializer):
-        if not self.request.user.can_manage_repositories:
-            raise PermissionDenied("Only the Principal can create shared repositories.")
+        if not self.request.user.can_create_shared_repositories:
+            raise PermissionDenied("A Principal or faculty member with an authorized designation is required to create a shared repository.")
+        if not serializer.validated_data.get("description", "").strip():
+            raise ValidationError({"description": "Explain the purpose of this shared repository."})
         repository = serializer.save(owner=self.request.user, kind=Repository.Kind.SHARED)
         log_event(self.request, AuditLog.Action.CREATED, repository)
         notify_users(
@@ -57,8 +64,11 @@ class RepositoryViewSet(viewsets.ModelViewSet):
         )
 
     def perform_update(self, serializer):
-        if not self.request.user.can_manage_repositories or serializer.instance.kind != Repository.Kind.SHARED:
-            raise PermissionDenied("Only the Principal can update shared repositories.")
+        if not self.request.user.can_manage_shared_repository(serializer.instance):
+            raise PermissionDenied("Only the Principal or repository initiator can update this shared repository.")
+        description = serializer.validated_data.get("description", serializer.instance.description)
+        if not description.strip():
+            raise ValidationError({"description": "Explain the purpose of this shared repository."})
         previous_audience = set(shared_repository_audience(serializer.instance).values_list("pk", flat=True))
         repository = serializer.save()
         log_event(self.request, AuditLog.Action.UPDATED, repository)
@@ -72,8 +82,8 @@ class RepositoryViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="eligible-members")
     def eligible_members(self, request):
-        if not request.user.can_manage_repositories:
-            raise PermissionDenied("Only the Principal can select shared repository members.")
+        if not request.user.can_create_shared_repositories:
+            raise PermissionDenied("An authorized designation is required to select shared repository members.")
         members = User.objects.filter(
             is_active=True,
             is_superuser=False,
@@ -82,8 +92,8 @@ class RepositoryViewSet(viewsets.ModelViewSet):
         return Response(UserSerializer(members, many=True, context={"request": request}).data)
 
     def perform_destroy(self, instance):
-        if not self.request.user.can_manage_repositories or instance.kind == Repository.Kind.PRIVATE:
-            raise PermissionDenied("Private repositories cannot be deleted; only the Principal can delete shared repositories.")
+        if not self.request.user.can_manage_shared_repository(instance):
+            raise PermissionDenied("Private repositories cannot be deleted; only the Principal or repository initiator can delete shared repositories.")
         log_event(self.request, AuditLog.Action.DELETED, instance)
         instance.delete()
 
@@ -98,13 +108,13 @@ class FolderViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         return Folder.objects.filter(repository__in=accessible_repositories(self.request.user)).select_related(
             "repository", "owner", "owner__department", "owner__position"
-        ).annotate(document_count=Count("documents", filter=Q(documents__is_archived=False))).order_by("name")
+        ).prefetch_related("owner__designations").annotate(document_count=Count("documents", filter=Q(documents__is_archived=False))).order_by("name")
 
     def _can_manage(self, folder):
         user = self.request.user
         return not user.is_superuser and (
             folder.owner_id == user.pk
-            or (user.can_manage_repositories and folder.repository.kind == Repository.Kind.SHARED)
+            or user.can_manage_shared_repository(folder.repository)
         )
 
     def perform_create(self, serializer):
@@ -149,7 +159,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
     ordering_fields = ("title", "created_at", "updated_at")
 
     def get_queryset(self):
-        return Document.objects.filter(repository__in=accessible_repositories(self.request.user)).select_related("owner", "repository", "folder", "folder__owner").prefetch_related("versions__uploaded_by").annotate(version_count=Count("versions")).distinct().order_by("-updated_at")
+        return Document.objects.filter(repository__in=accessible_repositories(self.request.user)).select_related("owner", "repository", "folder", "folder__owner").prefetch_related("owner__designations", "folder__owner__designations", "versions__uploaded_by__designations").annotate(version_count=Count("versions")).distinct().order_by("-updated_at")
 
     def get_serializer_class(self):
         return DocumentCreateSerializer if self.action == "create" else DocumentSerializer
@@ -189,7 +199,7 @@ class DocumentViewSet(viewsets.ModelViewSet):
     def versions(self, request, pk=None):
         document = self.get_object()
         if request.method == "GET":
-            return Response(DocumentVersionSerializer(document.versions.select_related("uploaded_by"), many=True, context={"request": request}).data)
+            return Response(DocumentVersionSerializer(document.versions.select_related("uploaded_by").prefetch_related("uploaded_by__designations"), many=True, context={"request": request}).data)
         if not request.user.is_assistant_principal and document.owner_id != request.user.id:
             raise PermissionDenied("You can only upload revisions to documents you own.")
         serializer = VersionUploadSerializer(data=request.data, context={"request": request, "document": document})
@@ -236,7 +246,7 @@ class AuditLogViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets
     filterset_fields = ("action", "actor")
 
     def get_queryset(self):
-        queryset = AuditLog.objects.select_related("actor")
+        queryset = AuditLog.objects.select_related("actor").prefetch_related("actor__designations")
         if self.request.user.is_assistant_principal:
             return queryset
         return queryset.filter(Q(actor=self.request.user) | Q(target_type="Document", target_id__in=self.request.user.documents.values("id")))
@@ -246,7 +256,7 @@ class NotificationViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixi
     serializer_class = NotificationSerializer
 
     def get_queryset(self):
-        return Notification.objects.filter(recipient=self.request.user).select_related("actor")
+        return Notification.objects.filter(recipient=self.request.user).select_related("actor").prefetch_related("actor__designations")
 
     @action(detail=False, methods=["get"], url_path="unread-count")
     def unread_count(self, request):
@@ -281,8 +291,8 @@ class DashboardView(APIView):
             "documents": documents.count(),
             "my_documents": documents.filter(owner=request.user).count(),
             "storage_bytes": total_bytes,
-            "recent_documents": DocumentSerializer(documents.select_related("owner", "repository", "folder", "folder__owner").prefetch_related("versions__uploaded_by").annotate(version_count=Count("versions"))[:6], many=True, context={"request": request}).data,
-            "recent_activity": AuditLogSerializer(AuditLog.objects.filter(Q(actor=request.user) | Q(target_id__in=documents.values("id"))).select_related("actor")[:8], many=True).data,
+            "recent_documents": DocumentSerializer(documents.select_related("owner", "repository", "folder", "folder__owner").prefetch_related("owner__designations", "folder__owner__designations", "versions__uploaded_by__designations").annotate(version_count=Count("versions"))[:6], many=True, context={"request": request}).data,
+            "recent_activity": AuditLogSerializer(AuditLog.objects.filter(Q(actor=request.user) | Q(target_id__in=documents.values("id"))).select_related("actor").prefetch_related("actor__designations")[:8], many=True).data,
             "generated_at": timezone.now(),
         }
         if request.user.is_superuser:
@@ -294,5 +304,5 @@ class DashboardView(APIView):
                 "departments": Department.objects.filter(is_active=True).count(),
                 "positions": Position.objects.filter(is_active=True).count(),
             }
-            data["recent_activity"] = AuditLogSerializer(AuditLog.objects.select_related("actor")[:8], many=True).data
+            data["recent_activity"] = AuditLogSerializer(AuditLog.objects.select_related("actor").prefetch_related("actor__designations")[:8], many=True).data
         return Response(data)

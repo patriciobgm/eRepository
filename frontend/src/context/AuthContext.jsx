@@ -29,7 +29,7 @@ export function AuthProvider({ children }) {
     return data
   }
   const logout = () => { localStorage.removeItem('accessToken'); localStorage.removeItem('refreshToken'); localStorage.removeItem('user'); setUser(null) }
-  const value = { user, setUser, login, googleAuth, logout, loading, refreshProfile, isAdmin: user?.role === 'ASSISTANT_PRINCIPAL' || user?.is_superuser, isSuperadmin: Boolean(user?.is_superuser), canManageRepositories: user?.role === 'ASSISTANT_PRINCIPAL' && !user?.is_superuser }
+  const value = { user, setUser, login, googleAuth, logout, loading, refreshProfile, isAdmin: user?.role === 'ASSISTANT_PRINCIPAL' || user?.is_superuser, isSuperadmin: Boolean(user?.is_superuser), canManageRepositories: user?.role === 'ASSISTANT_PRINCIPAL' && !user?.is_superuser, canCreateSharedRepositories: Boolean(user?.can_create_shared_repositories) }
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 

@@ -1,6 +1,6 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from accounts.views import (ChangePasswordView, DepartmentViewSet, GoogleAuthView, LoginView, PasswordResetConfirmView, PositionViewSet, RegistrationView,
+from accounts.views import (ChangePasswordView, DepartmentViewSet, DesignationViewSet, GoogleAuthView, LoginView, PasswordResetConfirmView, PositionViewSet, RegistrationView,
     PasswordResetRequestView, ProfileView, StaffUserViewSet, TwoFactorSetupView,
     TwoFactorVerifyView)
 
@@ -8,6 +8,7 @@ router = DefaultRouter()
 router.register("users", StaffUserViewSet, basename="users")
 router.register("departments", DepartmentViewSet, basename="departments")
 router.register("positions", PositionViewSet, basename="positions")
+router.register("designations", DesignationViewSet, basename="designations")
 
 urlpatterns = [
     path("login/", LoginView.as_view(), name="login"),

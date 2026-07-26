@@ -11,6 +11,8 @@ class RepositoryAccessPermission(BasePermission):
             return True
         if repository.kind == Repository.Kind.PRIVATE:
             return repository.owner_id == request.user.id
+        if repository.owner_id == request.user.id:
+            return True
         if request.method in SAFE_METHODS:
             return not repository.members.exists() or repository.members.filter(pk=request.user.pk).exists()
         if hasattr(obj, "owner_id"):

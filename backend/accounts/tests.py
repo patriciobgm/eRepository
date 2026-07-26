@@ -7,7 +7,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from accounts.models import Department, Position, User
+from accounts.models import Department, Designation, Position, User, UserDesignation
 from repository.models import Notification, Repository
 
 
@@ -126,6 +126,32 @@ class AdministrationBoundaryTests(APITestCase):
         self.assertEqual(denied.status_code, status.HTTP_403_FORBIDDEN)
         self.assertEqual(created.status_code, status.HTTP_201_CREATED)
         self.assertEqual(mismatch.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_principal_can_assign_designations_with_audit_and_notification(self):
+        research = Designation.objects.get(name="Research Coordinator")
+        self.client.force_authenticate(self.assistant)
+        response = self.client.patch(f"/api/auth/users/{self.teacher.id}/", {"designation_ids": [research.id]}, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        assignment = UserDesignation.objects.get(user=self.teacher, designation=research)
+        self.assertEqual(assignment.assigned_by, self.assistant)
+        self.assertTrue(response.data["can_create_shared_repositories"])
+        self.assertTrue(Notification.objects.filter(recipient=self.teacher, title="Designations updated").exists())
+
+    def test_designation_types_are_superadmin_managed(self):
+        self.client.force_authenticate(self.assistant)
+        denied = self.client.post("/api/auth/designations/", {"name": "Program Coordinator", "can_create_shared_repositories": True})
+        self.client.force_authenticate(self.superadmin)
+        created = self.client.post("/api/auth/designations/", {"name": "Program Coordinator", "description": "Coordinates a school program.", "can_create_shared_repositories": True})
+        self.assertEqual(denied.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+
+    def test_inactive_designation_revokes_repository_initiation_permission(self):
+        research = Designation.objects.get(name="Research Coordinator")
+        UserDesignation.objects.create(user=self.teacher, designation=research, assigned_by=self.assistant)
+        self.assertTrue(self.teacher.can_create_shared_repositories)
+        research.is_active = False
+        research.save(update_fields=["is_active"])
+        self.assertFalse(self.teacher.can_create_shared_repositories)
 
     def test_profile_name_change_updates_only_the_private_repository_name(self):
         shared = Repository.objects.create(

@@ -7,16 +7,19 @@ A secure document repository for public Senior High School faculty, built with D
 - Teacher, Master Teacher, Principal, and Django superadmin authority
 - Self-registration with Principal approval
 - Google Identity Services login and registration for Gmail and Google Workspace accounts
-- Superadmin-managed Principal access, department CRUD, and role-based position CRUD
+- Superadmin-managed Principal access, department CRUD, role-based position CRUD, and designation catalog
 - Managed default departments: TVL, ABM & Mathematics, Science & Social Sciences, PE & Language, and Admin
 - Automatically provisioned private repository for every faculty account
-- Shared repositories created and managed only by the Principal
+- Principal/Superadmin designation assignment for Teachers and Master Teachers, with assignment history
+- Purpose-specific shared repositories initiated by the Principal or faculty with an authorized designation
+- Private/shared repository folders with folder ownership and root-folder uploads
+- Persistent per-user notifications with unread, read, remove, and clear-all controls
 - Office, PDF, text, image, OpenDocument, CSV, and ZIP uploads (50 MB default limit)
 - Document ownership, immutable revision history, SHA-256 checksums, archive/restore, and protected downloads
 - Search, tags, repository filters, dashboards, and responsive MUI interface
 - Append-only audit trail for create, update, revision, download, archive, restore, and delete events
 - Profile/avatar management, password validation with email confirmation, JWT sessions, and authenticator-app 2FA
-- Staff management and registration approval queue
+- Superadmin administration, Principal staff management, and registration approval queue
 - Provider-aware forgot/reset-password screens and API rate limiting
 
 ## Local setup

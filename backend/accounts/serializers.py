@@ -17,7 +17,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
-from accounts.models import Department, Position, User
+from accounts.models import Department, Designation, Position, User, UserDesignation
 
 
 def unique_username(email):
@@ -73,6 +73,29 @@ class PositionSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class DesignationSerializer(serializers.ModelSerializer):
+    user_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Designation
+        fields = ("id", "name", "description", "can_create_shared_repositories", "is_active", "user_count", "created_at", "updated_at")
+        read_only_fields = ("id", "user_count", "created_at", "updated_at")
+
+    def get_user_count(self, obj):
+        if hasattr(obj, "user_count"):
+            return obj.user_count
+        return obj.assignments.count()
+
+    def validate_name(self, value):
+        name = value.strip()
+        queryset = Designation.objects.filter(name__iexact=name)
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError("A designation with this name already exists.")
+        return name
+
+
 class UserSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     avatar_url = serializers.SerializerMethodField()
@@ -82,10 +105,13 @@ class UserSerializer(serializers.ModelSerializer):
     position_id = serializers.PrimaryKeyRelatedField(source="position", queryset=Position.objects.all(), required=False, allow_null=True)
     role_label = serializers.CharField(source="get_role_display", read_only=True)
     has_usable_password = serializers.SerializerMethodField()
+    designations = DesignationSerializer(many=True, read_only=True)
+    designation_ids = serializers.SerializerMethodField()
+    can_create_shared_repositories = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = User
-        fields = ("id", "username", "email", "first_name", "last_name", "full_name", "role", "role_label", "employee_id", "department", "department_id", "position", "position_id", "bio", "mobile", "avatar", "avatar_url", "two_factor_enabled", "auth_provider", "has_usable_password", "is_active", "is_superuser", "date_joined")
+        fields = ("id", "username", "email", "first_name", "last_name", "full_name", "role", "role_label", "employee_id", "department", "department_id", "position", "position_id", "designations", "designation_ids", "can_create_shared_repositories", "bio", "mobile", "avatar", "avatar_url", "two_factor_enabled", "auth_provider", "has_usable_password", "is_active", "is_superuser", "date_joined")
         read_only_fields = ("id", "username", "role", "role_label", "employee_id", "department", "position", "two_factor_enabled", "auth_provider", "has_usable_password", "is_active", "is_superuser", "date_joined", "avatar_url")
 
     def get_full_name(self, obj):
@@ -99,6 +125,9 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_has_usable_password(self, obj):
         return obj.has_usable_password()
+
+    def get_designation_ids(self, obj):
+        return [designation.pk for designation in obj.designations.all()]
 
     def validate(self, attrs):
         role = attrs.get("role", getattr(self.instance, "role", None))
@@ -116,6 +145,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 class StaffUserSerializer(UserSerializer):
     password = serializers.CharField(write_only=True, required=False, min_length=8)
+    designation_ids = serializers.PrimaryKeyRelatedField(source="designations", many=True, queryset=Designation.objects.filter(is_active=True), required=False)
 
     class Meta(UserSerializer.Meta):
         fields = UserSerializer.Meta.fields + ("password",)
@@ -124,20 +154,68 @@ class StaffUserSerializer(UserSerializer):
     def validate_employee_id(self, value):
         return value or None
 
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        role = attrs.get("role", getattr(self.instance, "role", None))
+        designations = attrs.get("designations")
+        if designations and role not in (User.Role.TEACHER, User.Role.MASTER_TEACHER):
+            raise serializers.ValidationError({"designation_ids": "Only Teachers and Master Teachers can receive designations."})
+        return attrs
+
+    def _apply_designations(self, user, designations):
+        designation_ids = {designation.pk for designation in designations}
+        previous = {assignment.designation_id: assignment.designation.name for assignment in UserDesignation.objects.filter(user=user).select_related("designation")}
+        UserDesignation.objects.filter(user=user).exclude(designation_id__in=designation_ids).delete()
+        existing_ids = set(UserDesignation.objects.filter(user=user).values_list("designation_id", flat=True))
+        assigned_by = self.context.get("request").user if self.context.get("request") else None
+        UserDesignation.objects.bulk_create([
+            UserDesignation(user=user, designation=designation, assigned_by=assigned_by)
+            for designation in designations
+            if designation.pk not in existing_ids
+        ])
+        current = {designation.pk: designation.name for designation in designations}
+        added = [current[pk] for pk in current.keys() - previous.keys()]
+        removed = [previous[pk] for pk in previous.keys() - current.keys()]
+        if added or removed:
+            from repository.models import Notification
+            from repository.services import notify_users
+            changes = []
+            if added:
+                changes.append(f"Assigned: {', '.join(sorted(added))}")
+            if removed:
+                changes.append(f"Removed: {', '.join(sorted(removed))}")
+            notify_users(
+                [user.pk],
+                category=Notification.Category.ACCOUNT,
+                title="Designations updated",
+                message=". ".join(changes) + ".",
+                actor=assigned_by,
+                link="/profile",
+            )
+
     def create(self, validated_data):
         password = validated_data.pop("password", None) or secrets.token_urlsafe(12)
+        designations = validated_data.pop("designations", [])
         if validated_data.get("is_superuser"):
             validated_data["is_staff"] = True
         user = User(**validated_data)
         user.set_password(password)
         user.save()
+        if user.role in (User.Role.TEACHER, User.Role.MASTER_TEACHER):
+            self._apply_designations(user, designations)
         return user
 
     def update(self, instance, validated_data):
         password = validated_data.pop("password", None)
+        designation_supplied = "designations" in validated_data
+        designations = validated_data.pop("designations", [])
         if "is_superuser" in validated_data:
             validated_data["is_staff"] = validated_data["is_superuser"]
         instance = super().update(instance, validated_data)
+        if instance.role not in (User.Role.TEACHER, User.Role.MASTER_TEACHER) or instance.is_superuser:
+            instance.designation_assignments.all().delete()
+        elif designation_supplied:
+            self._apply_designations(instance, designations)
         if password:
             instance.set_password(password)
             instance.save(update_fields=["password"])

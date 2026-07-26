@@ -36,6 +36,21 @@ class Position(models.Model):
         return self.name
 
 
+class Designation(models.Model):
+    name = models.CharField(max_length=120, unique=True)
+    description = models.TextField(blank=True)
+    can_create_shared_repositories = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("name",)
+
+    def __str__(self):
+        return self.name
+
+
 class User(AbstractUser):
     class Role(models.TextChoices):
         TEACHER = "TEACHER", "Teacher"
@@ -59,6 +74,7 @@ class User(AbstractUser):
     two_factor_secret = models.CharField(max_length=64, blank=True)
     auth_provider = models.CharField(max_length=12, choices=AuthProvider.choices, default=AuthProvider.PASSWORD)
     google_subject = models.CharField(max_length=255, unique=True, null=True, blank=True, editable=False)
+    designations = models.ManyToManyField(Designation, through="UserDesignation", through_fields=("user", "designation"), related_name="users", blank=True)
 
     @property
     def is_superadmin(self):
@@ -71,6 +87,22 @@ class User(AbstractUser):
     @property
     def can_manage_repositories(self):
         return self.role == self.Role.ASSISTANT_PRINCIPAL and not self.is_superuser
+
+    @property
+    def can_create_shared_repositories(self):
+        if self.is_superuser:
+            return False
+        if self.role == self.Role.ASSISTANT_PRINCIPAL:
+            return True
+        return self.role in (self.Role.TEACHER, self.Role.MASTER_TEACHER) and self.designations.filter(
+            is_active=True,
+            can_create_shared_repositories=True,
+        ).exists()
+
+    def can_manage_shared_repository(self, repository):
+        return not self.is_superuser and repository.kind == "SHARED" and (
+            self.can_manage_repositories or repository.owner_id == self.pk
+        )
 
     def save(self, *args, **kwargs):
         if self.is_superuser:
@@ -102,3 +134,17 @@ class User(AbstractUser):
 
     def verify_otp(self, code):
         return bool(self.two_factor_secret and pyotp.TOTP(self.two_factor_secret).verify(str(code), valid_window=1))
+
+
+class UserDesignation(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="designation_assignments")
+    designation = models.ForeignKey(Designation, on_delete=models.PROTECT, related_name="assignments")
+    assigned_by = models.ForeignKey(User, on_delete=models.SET_NULL, related_name="designation_assignments_made", null=True, blank=True)
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("designation__name",)
+        constraints = [models.UniqueConstraint(fields=("user", "designation"), name="unique_user_designation")]
+
+    def __str__(self):
+        return f"{self.user} — {self.designation}"

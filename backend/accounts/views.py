@@ -11,8 +11,8 @@ from rest_framework.permissions import SAFE_METHODS
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from accounts.models import Department, Position, User
-from accounts.serializers import (ChangePasswordSerializer, DepartmentSerializer, GoogleAuthSerializer, LoginSerializer,
+from accounts.models import Department, Designation, Position, User
+from accounts.serializers import (ChangePasswordSerializer, DepartmentSerializer, DesignationSerializer, GoogleAuthSerializer, LoginSerializer,
     PasswordResetRequestSerializer, PositionSerializer, RegistrationSerializer, StaffUserSerializer, TwoFactorSetupSerializer,
     TwoFactorVerifySerializer, UserSerializer)
 
@@ -138,11 +138,11 @@ class TwoFactorVerifyView(generics.GenericAPIView):
 class StaffUserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.order_by("last_name", "first_name")
     serializer_class = StaffUserSerializer
-    search_fields = ("first_name", "last_name", "email", "employee_id", "department__name", "position__name")
-    filterset_fields = ("role", "department", "position", "is_active")
+    search_fields = ("first_name", "last_name", "email", "employee_id", "department__name", "position__name", "designations__name")
+    filterset_fields = ("role", "department", "position", "designations", "is_active")
 
     def get_queryset(self):
-        queryset = super().get_queryset().exclude(pk=self.request.user.pk)
+        queryset = super().get_queryset().select_related("department", "position").prefetch_related("designations").exclude(pk=self.request.user.pk).distinct()
         if not self.request.user.is_superuser:
             queryset = queryset.exclude(Q(is_superuser=True) | Q(role=User.Role.ASSISTANT_PRINCIPAL))
         return queryset
@@ -274,3 +274,27 @@ class PositionViewSet(viewsets.ModelViewSet):
             instance.delete()
         except ProtectedError:
             raise PermissionDenied("Reassign staff using this position before deleting it.")
+
+
+class DesignationViewSet(viewsets.ModelViewSet):
+    serializer_class = DesignationSerializer
+    search_fields = ("name", "description")
+    filterset_fields = ("is_active", "can_create_shared_repositories")
+    ordering_fields = ("name", "created_at")
+
+    def get_queryset(self):
+        queryset = Designation.objects.annotate(user_count=Count("assignments", distinct=True)).order_by("name")
+        if self.request.user.is_superuser:
+            return queryset
+        return queryset.filter(is_active=True)
+
+    def check_permissions(self, request):
+        super().check_permissions(request)
+        if request.method not in SAFE_METHODS and not request.user.is_superuser:
+            self.permission_denied(request, message="Only a superadmin can manage designation types.")
+
+    def perform_destroy(self, instance):
+        try:
+            instance.delete()
+        except ProtectedError:
+            raise PermissionDenied("Remove this designation from faculty before deleting it.")

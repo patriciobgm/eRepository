@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 
-from accounts.models import Department, Position, User
+from accounts.models import Department, Designation, Position, User, UserDesignation
 from repository.models import Repository
 
 
@@ -29,5 +29,7 @@ class Command(BaseCommand):
                 user.save(update_fields=["password"])
             users.append(user)
         admin = users[1]
+        research, _ = Designation.objects.get_or_create(name="Research Coordinator", defaults={"description": "Coordinates faculty research initiatives and resources.", "can_create_shared_repositories": True})
+        UserDesignation.objects.get_or_create(user=users[3], designation=research, defaults={"assigned_by": admin})
         Repository.objects.get_or_create(name="School-Wide Teaching Resources", kind=Repository.Kind.SHARED, defaults={"description": "Teaching materials available to all faculty.", "owner": admin})
         self.stdout.write(self.style.SUCCESS("Demo ready. Sign in with superadmin@school.edu, admin@school.edu, teacher@school.edu, or master@school.edu using DemoPass!2026"))

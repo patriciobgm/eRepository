@@ -13,11 +13,13 @@ export default function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const theme = useTheme(); const desktop = useMediaQuery(theme.breakpoints.up('md')); const location = useLocation()
   const { user, logout, isAdmin } = useAuth()
+  const administrationLabel = user?.is_superuser ? 'Administration' : 'Staff management'
+  const pageTitle = location.pathname === '/staff' ? administrationLabel : titles[location.pathname] || 'eRepository'
   const items = [
     { label: 'Overview', to: '/', icon: <DashboardOutlined /> },
     { label: 'Repositories', to: '/repositories', icon: <FolderSharedOutlined /> },
     { label: 'Activity log', to: '/activity', icon: <HistoryOutlined /> },
-    ...(isAdmin ? [{ label: 'Staff management', to: '/staff', icon: <PeopleAltOutlined /> }] : []),
+    ...(isAdmin ? [{ label: administrationLabel, to: '/staff', icon: <PeopleAltOutlined /> }] : []),
     { label: 'My profile', to: '/profile', icon: <AccountCircleOutlined /> },
   ]
   const drawer = <Box height="100%" display="flex" flexDirection="column" bgcolor="#0D4938" color="white">
@@ -30,7 +32,7 @@ export default function AppLayout() {
     <Box p={2}><Box p={1.5} bgcolor="rgba(255,255,255,.08)" borderRadius={3}><Stack direction="row" gap={1.25} alignItems="center"><Avatar src={user?.avatar_url} sx={{ width: 38, height: 38, bgcolor: 'secondary.main' }}>{user?.first_name?.[0]}</Avatar><Box minWidth={0} flex={1}><Typography variant="body2" fontWeight={700} noWrap>{user?.full_name}</Typography><Typography variant="caption" sx={{ opacity: .65 }} noWrap>{user?.is_superuser ? 'Superadmin' : user?.position || roleLabel(user?.role)}</Typography></Box><Tooltip title="Sign out"><IconButton size="small" onClick={logout} sx={{ color: 'white' }}><LogoutRounded fontSize="small" /></IconButton></Tooltip></Stack></Box></Box>
   </Box>
   return <Box display="flex" minHeight="100vh">
-    <AppBar position="fixed" color="inherit" elevation={0} sx={{ ml: { md: `${drawerWidth}px` }, width: { md: `calc(100% - ${drawerWidth}px)` }, borderBottom: '1px solid', borderColor: 'divider' }}><Toolbar sx={{ minHeight: '72px !important' }}><IconButton onClick={() => setMobileOpen(true)} sx={{ mr: 1, display: { md: 'none' } }}><MenuRounded /></IconButton><Box flex={1}><Typography variant="h6" fontWeight={750}>{titles[location.pathname] || 'eRepository'}</Typography><Typography variant="caption" color="text.secondary">Secure faculty document workspace</Typography></Box><Stack direction="row" alignItems="center" gap={1}><NotificationBell /><Chip size="small" label={user?.is_superuser ? 'SUPERADMIN' : roleLabel(user?.role)} sx={{ display: { xs: 'none', sm: 'flex' }, bgcolor: 'primary.light', color: 'primary.dark', fontWeight: 700 }} /></Stack></Toolbar></AppBar>
+    <AppBar position="fixed" color="inherit" elevation={0} sx={{ ml: { md: `${drawerWidth}px` }, width: { md: `calc(100% - ${drawerWidth}px)` }, borderBottom: '1px solid', borderColor: 'divider' }}><Toolbar sx={{ minHeight: '72px !important' }}><IconButton onClick={() => setMobileOpen(true)} sx={{ mr: 1, display: { md: 'none' } }}><MenuRounded /></IconButton><Box flex={1}><Typography variant="h6" fontWeight={750}>{pageTitle}</Typography><Typography variant="caption" color="text.secondary">Secure faculty document workspace</Typography></Box><Stack direction="row" alignItems="center" gap={1}><NotificationBell /><Chip size="small" label={user?.is_superuser ? 'SUPERADMIN' : roleLabel(user?.role)} sx={{ display: { xs: 'none', sm: 'flex' }, bgcolor: 'primary.light', color: 'primary.dark', fontWeight: 700 }} /></Stack></Toolbar></AppBar>
     <Box component="nav" width={{ md: drawerWidth }} flexShrink={{ md: 0 }}><Drawer variant={desktop ? 'permanent' : 'temporary'} open={desktop || mobileOpen} onClose={() => setMobileOpen(false)} ModalProps={{ keepMounted: true }} sx={{ '& .MuiDrawer-paper': { width: drawerWidth, border: 0 } }}>{drawer}</Drawer></Box>
     <Box component="main" flex={1} minWidth={0} pt="72px"><Box p={{ xs: 2, sm: 3, lg: 4 }} maxWidth={1500} mx="auto"><Outlet /></Box></Box>
   </Box>

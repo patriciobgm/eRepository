@@ -2,7 +2,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from accounts.models import User
+from accounts.models import Designation, User, UserDesignation
 from repository.models import AuditLog, Document, Folder, Notification, Repository
 
 
@@ -65,6 +65,40 @@ class RepositoryPermissionTests(APITestCase):
         self.client.force_authenticate(self.other)
         other_repositories = self.client.get("/api/repositories/")
         self.assertIn(repository_id, [item["id"] for item in other_repositories.data["results"]])
+
+    def test_designated_teacher_can_initiate_and_manage_only_their_shared_repository(self):
+        designation = Designation.objects.get(name="Research Coordinator")
+        UserDesignation.objects.create(user=self.teacher, designation=designation, assigned_by=self.admin)
+        other_shared = Repository.objects.create(owner=self.admin, kind=Repository.Kind.SHARED, name="Principal Repository")
+        self.client.force_authenticate(self.teacher)
+
+        created = self.client.post("/api/repositories/", {
+            "name": "Research Repository",
+            "description": "For the school research program.",
+            "member_ids": [self.other.id],
+        }, format="json")
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED)
+        repository_id = created.data["id"]
+        self.assertEqual(created.data["owner"]["id"], self.teacher.id)
+
+        own_update = self.client.patch(f"/api/repositories/{repository_id}/", {"description": "Updated research purpose."})
+        other_update = self.client.patch(f"/api/repositories/{other_shared.id}/", {"description": "Not allowed"})
+        self.assertEqual(own_update.status_code, status.HTTP_200_OK)
+        self.assertEqual(other_update.status_code, status.HTTP_403_FORBIDDEN)
+
+        repository_ids = [item["id"] for item in self.client.get("/api/repositories/").data["results"]]
+        self.assertIn(repository_id, repository_ids)
+
+    def test_teacher_without_designation_cannot_initiate_shared_repository(self):
+        self.client.force_authenticate(self.teacher)
+        response = self.client.post("/api/repositories/", {"name": "Unauthorized", "description": "No designation"})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_shared_repository_requires_a_stated_purpose(self):
+        self.client.force_authenticate(self.admin)
+        response = self.client.post("/api/repositories/", {"name": "No Purpose"})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("description", response.data)
 
     def test_principal_cannot_rename_a_private_repository(self):
         private = Repository.objects.get(owner=self.teacher, kind=Repository.Kind.PRIVATE)
