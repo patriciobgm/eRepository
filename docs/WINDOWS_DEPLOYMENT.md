@@ -9,8 +9,8 @@ Internet -> GoDaddy DNS -> router TCP 80/443 -> Caddy
                                                                             `-> private local media
 ```
 
-Replace every occurrence of `repository.example.edu.ph` with the school's real
-domain. The examples assume the application is installed at `C:\eRepository`.
+This deployment is customized for the school's official domain,
+`jshs-shs.com`, and installs the application on `D:\eRepository`.
 
 ## 1. Do not expose an unsupported Windows installation
 
@@ -36,8 +36,9 @@ https://learn.microsoft.com/en-us/lifecycle/announcements/windows-10-end-of-supp
   allows 50 MB per document; 500 faculty uploads per month at 10 MB average is
   about 60 GB/year before backups and revision history.
 - A separate external USB backup disk, NAS/network share, or approved encrypted
-  off-site target. The server may have only `C:`, but another folder on that same
-  physical disk is not a backup.
+  off-site target. The new `D:` partition is suitable for application data, but
+  if `C:` and `D:` are partitions on the same physical disk, `D:` is not an
+  independent backup.
 - UPS with USB shutdown support, wired Ethernet, and router/admin access.
 - A business Internet connection with adequate upload speed and preferably one
   static public IPv4 address.
@@ -79,11 +80,11 @@ for this deployment. They are not part of this architecture.
 10. Create these folders in an elevated PowerShell window:
 
 ```powershell
-New-Item -ItemType Directory -Force C:\eRepository\data\media
-New-Item -ItemType Directory -Force C:\eRepository\logs
-New-Item -ItemType Directory -Force C:\eRepository\tools\caddy
-New-Item -ItemType Directory -Force C:\eRepository\services\backend
-New-Item -ItemType Directory -Force C:\eRepository\services\caddy
+New-Item -ItemType Directory -Force D:\eRepository\data\media
+New-Item -ItemType Directory -Force D:\eRepository\logs
+New-Item -ItemType Directory -Force D:\eRepository\tools\caddy
+New-Item -ItemType Directory -Force D:\eRepository\services\backend
+New-Item -ItemType Directory -Force D:\eRepository\services\caddy
 ```
 
 ## 4. Install the prerequisites
@@ -111,7 +112,7 @@ node --version
 npm --version
 ```
 
-Download `caddy.exe` into `C:\eRepository\tools\caddy`. Download the WinSW
+Download `caddy.exe` into `D:\eRepository\tools\caddy`. Download the WinSW
 x64 executable later into each service folder as described in section 11.
 
 ## 5. Create the PostgreSQL database
@@ -148,9 +149,9 @@ frontend files.
 For a fresh production database, open elevated PowerShell:
 
 ```powershell
-Set-Location C:\
+Set-Location D:\
 git clone https://github.com/patriciobgm/eRepository.git
-Set-Location C:\eRepository
+Set-Location D:\eRepository
 git status
 ```
 
@@ -171,10 +172,10 @@ tar -czf media-backup.tar.gz media
 
 Transfer those two files over an encrypted external disk or secure LAN. Do not
 commit them to GitHub. Complete migrations on Windows first, copy media into
-`C:\eRepository\data\media`, then import:
+`D:\eRepository\data\media`, then import:
 
 ```powershell
-Set-Location C:\eRepository\backend
+Set-Location D:\eRepository\backend
 .\.venv\Scripts\python.exe manage.py loaddata production-data.json
 ```
 
@@ -184,7 +185,7 @@ only demo data, start clean instead and never run `seed_demo` in production.
 ## 7. Configure and build Django
 
 ```powershell
-Set-Location C:\eRepository\backend
+Set-Location D:\eRepository\backend
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
@@ -207,7 +208,7 @@ Edit `backend\.env` and set all values. At minimum:
 - the new `DJANGO_SECRET_KEY`
 - the real domain in allowed hosts, trusted origins, CORS, and frontend URL
 - PostgreSQL database name/user/password
-- `DJANGO_MEDIA_ROOT=C:\eRepository\data\media`
+- `DJANGO_MEDIA_ROOT=D:\eRepository\data\media`
 - production Google client ID
 - working SMTP configuration
 
@@ -215,8 +216,8 @@ The application now loads `backend\.env` automatically. `.env.example` is only a
 template and must never contain real credentials. Restrict the production file:
 
 ```powershell
-icacls C:\eRepository\backend\.env /inheritance:r
-icacls C:\eRepository\backend\.env /grant:r "SYSTEM:(R)" "Administrators:(F)"
+icacls D:\eRepository\backend\.env /inheritance:r
+icacls D:\eRepository\backend\.env /grant:r "SYSTEM:(R)" "Administrators:(F)"
 ```
 
 Initialize and validate Django:
@@ -252,7 +253,7 @@ The frontend's environment variables are embedded at build time. Changing its
 `.env` after `npm run build` has no effect until it is rebuilt.
 
 ```powershell
-Set-Location C:\eRepository\frontend
+Set-Location D:\eRepository\frontend
 Copy-Item ..\deploy\windows\frontend.env.production.example .env
 notepad .env
 npm ci
@@ -262,7 +263,7 @@ npm run build
 
 Set `VITE_API_URL=/api` so browser traffic uses the same HTTPS origin. Put the
 same Google client ID used by Django in `VITE_GOOGLE_CLIENT_ID`. The build output
-must exist at `C:\eRepository\frontend\dist`.
+must exist at `D:\eRepository\frontend\dist`.
 
 ## 9. Configure Google login and email
 
@@ -270,7 +271,7 @@ In Google Cloud Console, open the existing **Web application** OAuth client and
 add this exact Authorized JavaScript origin:
 
 ```text
-https://repository.example.edu.ph
+https://jshs-shs.com
 ```
 
 If `www` is only redirected to the canonical non-www domain, it does not need to
@@ -316,8 +317,8 @@ Create Windows Firewall rules in elevated PowerShell. Bind the rules to the Cadd
 program, not every process:
 
 ```powershell
-New-NetFirewallRule -DisplayName "eRepository HTTPS" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 443 -Program "C:\eRepository\tools\caddy\caddy.exe"
-New-NetFirewallRule -DisplayName "eRepository HTTP ACME" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 80 -Program "C:\eRepository\tools\caddy\caddy.exe"
+New-NetFirewallRule -DisplayName "eRepository HTTPS" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 443 -Program "D:\eRepository\tools\caddy\caddy.exe"
+New-NetFirewallRule -DisplayName "eRepository HTTP ACME" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 80 -Program "D:\eRepository\tools\caddy\caddy.exe"
 ```
 
 Do not add an inbound rule for Waitress port 8000; it listens only on loopback.
@@ -332,9 +333,9 @@ not mix that design with the direct Caddy certificate steps in this guide.
 Copy and edit the Caddy configuration:
 
 ```powershell
-Copy-Item C:\eRepository\deploy\windows\Caddyfile.example C:\eRepository\tools\caddy\Caddyfile
-notepad C:\eRepository\tools\caddy\Caddyfile
-C:\eRepository\tools\caddy\caddy.exe validate --config C:\eRepository\tools\caddy\Caddyfile --adapter caddyfile
+Copy-Item D:\eRepository\deploy\windows\Caddyfile.example D:\eRepository\tools\caddy\Caddyfile
+notepad D:\eRepository\tools\caddy\Caddyfile
+D:\eRepository\tools\caddy\caddy.exe validate --config D:\eRepository\tools\caddy\Caddyfile --adapter caddyfile
 ```
 
 Replace both example hostnames. Caddy will obtain and renew public HTTPS
@@ -344,12 +345,12 @@ service options are documented at https://caddyserver.com/docs/running.
 ### Backend service
 
 1. Put a copy of the WinSW x64 executable at
-   `C:\eRepository\services\backend\erepository-backend-service.exe`.
+   `D:\eRepository\services\backend\erepository-backend-service.exe`.
 2. Copy the matching XML beside it:
 
 ```powershell
-Copy-Item C:\eRepository\deploy\windows\erepository-backend-service.xml.example C:\eRepository\services\backend\erepository-backend-service.xml
-Set-Location C:\eRepository\services\backend
+Copy-Item D:\eRepository\deploy\windows\erepository-backend-service.xml.example D:\eRepository\services\backend\erepository-backend-service.xml
+Set-Location D:\eRepository\services\backend
 .\erepository-backend-service.exe install
 .\erepository-backend-service.exe start
 ```
@@ -357,27 +358,27 @@ Set-Location C:\eRepository\services\backend
 ### Caddy service
 
 1. Put another WinSW x64 executable at
-   `C:\eRepository\services\caddy\caddy-service.exe`.
+   `D:\eRepository\services\caddy\caddy-service.exe`.
 2. Copy and install the matching configuration:
 
 ```powershell
-Copy-Item C:\eRepository\deploy\windows\caddy-service.xml.example C:\eRepository\services\caddy\caddy-service.xml
-Set-Location C:\eRepository\services\caddy
+Copy-Item D:\eRepository\deploy\windows\caddy-service.xml.example D:\eRepository\services\caddy\caddy-service.xml
+Set-Location D:\eRepository\services\caddy
 .\caddy-service.exe install
 .\caddy-service.exe start
 ```
 
 Confirm both services are `Running` and `Automatic` in `services.msc`. Check
-`C:\eRepository\logs` for startup errors. Waitress is used because Django's
+`D:\eRepository\logs` for startup errors. Waitress is used because Django's
 development server is not suitable for production and Waitress supports Windows.
 
 ## 12. First production verification
 
 Test from a phone using cellular data, not school Wi-Fi:
 
-1. `https://repository.example.edu.ph` opens with a valid certificate.
+1. `https://jshs-shs.com` opens with a valid certificate.
 2. `http://...` redirects to HTTPS and `www` redirects to the canonical hostname.
-3. `https://repository.example.edu.ph/api/health/` returns `{"status":"ok"}`.
+3. `https://jshs-shs.com/api/health/` returns `{"status":"ok"}`.
 4. Log in as the newly created superadmin and change/secure its credentials.
 5. Create/approve a test teacher, then test password and Google login.
 6. Test 2FA after confirming Windows time synchronization is accurate.
@@ -407,7 +408,7 @@ Test manually against the real NAS share (the account running the command must
 have write access):
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\eRepository\deploy\windows\backup.ps1 -BackupRoot "\\JSHS-NAS\Backups\eRepository"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File D:\eRepository\deploy\windows\backup.ps1 -BackupRoot "\\JSHS-NAS\Backups\eRepository"
 ```
 
 Then create a Task Scheduler task:
@@ -416,8 +417,8 @@ Then create a Task Scheduler task:
 - Trigger daily outside school hours.
 - Program: `powershell.exe`
 - Arguments:
-  `-NoProfile -ExecutionPolicy Bypass -File C:\eRepository\deploy\windows\backup.ps1 -BackupRoot "\\JSHS-NAS\Backups\eRepository"`
-- Start in: `C:\eRepository`
+  `-NoProfile -ExecutionPolicy Bypass -File D:\eRepository\deploy\windows\backup.ps1 -BackupRoot "\\JSHS-NAS\Backups\eRepository"`
+- Start in: `D:\eRepository`
 - Fail the task on a non-zero exit and notify the responsible administrator.
 
 Maintain a 3-2-1 backup policy: production plus two copies, on two media types,
@@ -430,7 +431,7 @@ Typical clean restore sequence:
 
 ```powershell
 pg_restore --clean --if-exists --no-owner --host=127.0.0.1 --username=erepository --dbname=erepository "\\JSHS-NAS\Backups\eRepository\TIMESTAMP\database.dump"
-robocopy "\\JSHS-NAS\Backups\eRepository\TIMESTAMP\media" C:\eRepository\data\media /E /COPY:DAT /DCOPY:DAT
+robocopy "\\JSHS-NAS\Backups\eRepository\TIMESTAMP\media" D:\eRepository\data\media /E /COPY:DAT /DCOPY:DAT
 ```
 
 Stop the backend during a disaster restore. Never test restoration over the only
@@ -442,23 +443,23 @@ Schedule downtime, verify the previous night's backup, then use elevated
 PowerShell:
 
 ```powershell
-C:\eRepository\services\backend\erepository-backend-service.exe stop
-Set-Location C:\eRepository
+D:\eRepository\services\backend\erepository-backend-service.exe stop
+Set-Location D:\eRepository
 git fetch origin
 git status
 git pull --ff-only origin main
-Set-Location C:\eRepository\backend
+Set-Location D:\eRepository\backend
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 .\.venv\Scripts\python.exe manage.py migrate
 .\.venv\Scripts\python.exe manage.py collectstatic --noinput
 .\.venv\Scripts\python.exe manage.py check --deploy
-Set-Location C:\eRepository\frontend
+Set-Location D:\eRepository\frontend
 npm ci
 npm run lint
 npm run build
-C:\eRepository\services\backend\erepository-backend-service.exe start
-C:\eRepository\tools\caddy\caddy.exe validate --config C:\eRepository\tools\caddy\Caddyfile --adapter caddyfile
-C:\eRepository\services\caddy\caddy-service.exe restart
+D:\eRepository\services\backend\erepository-backend-service.exe start
+D:\eRepository\tools\caddy\caddy.exe validate --config D:\eRepository\tools\caddy\Caddyfile --adapter caddyfile
+D:\eRepository\services\caddy\caddy-service.exe restart
 ```
 
 Run the production verification checks after every update. A Git rollback does

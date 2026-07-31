@@ -1,12 +1,12 @@
-www.repository.example.edu.ph {
-	redir https://repository.example.edu.ph{uri} permanent
+www.jshs-shs.com {
+	redir https://jshs-shs.com{uri} permanent
 }
 
-repository.example.edu.ph {
+jshs-shs.com {
 	encode zstd gzip
 
 	log {
-		output file C:\eRepository\logs\caddy-access.log {
+		output file D:\eRepository\logs\caddy-access.log {
 			roll_size 20MiB
 			roll_keep 10
 			roll_keep_for 30d
@@ -26,19 +26,19 @@ repository.example.edu.ph {
 	}
 
 	handle_path /static/* {
-		root * C:\eRepository\backend\staticfiles
+		root * D:\eRepository\backend\staticfiles
 		file_server
 	}
 
 	# Only profile avatars are public media. Repository documents stay behind
 	# Django's authenticated /api/versions/<id>/download/ endpoint.
 	handle_path /media/avatars/* {
-		root * C:\eRepository\data\media\avatars
+		root * D:\eRepository\data\media\avatars
 		file_server
 	}
 
 	handle {
-		root * C:\eRepository\frontend\dist
+		root * D:\eRepository\frontend\dist
 		try_files {path} /index.html
 		file_server
 	}

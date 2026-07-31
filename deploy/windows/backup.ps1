@@ -1,6 +1,6 @@
 param(
     [string]$BackupRoot = "\\BACKUP-NAS\eRepository-Backups",
-    [string]$MediaRoot = "C:\eRepository\data\media",
+    [string]$MediaRoot = "D:\eRepository\data\media",
     [string]$DatabaseName = "erepository",
     [string]$DatabaseUser = "erepository",
     [string]$DatabaseHost = "127.0.0.1",
