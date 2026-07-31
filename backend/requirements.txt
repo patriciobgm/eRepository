@@ -7,3 +7,6 @@ pyotp>=2.9,<3
 qrcode[pil]>=8.2,<9
 Pillow>=11.2,<12
 google-auth[requests]>=2.40,<3
+psycopg[binary]>=3.2,<4
+python-dotenv>=1.1,<2
+waitress>=3.0,<4

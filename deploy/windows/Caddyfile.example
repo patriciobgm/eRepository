@@ -1,0 +1,45 @@
+www.repository.example.edu.ph {
+	redir https://repository.example.edu.ph{uri} permanent
+}
+
+repository.example.edu.ph {
+	encode zstd gzip
+
+	log {
+		output file C:\eRepository\logs\caddy-access.log {
+			roll_size 20MiB
+			roll_keep 10
+			roll_keep_for 30d
+		}
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy same-origin
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	@django path /api/* /admin/*
+	handle @django {
+		reverse_proxy 127.0.0.1:8000
+	}
+
+	handle_path /static/* {
+		root * C:\eRepository\backend\staticfiles
+		file_server
+	}
+
+	# Only profile avatars are public media. Repository documents stay behind
+	# Django's authenticated /api/versions/<id>/download/ endpoint.
+	handle_path /media/avatars/* {
+		root * C:\eRepository\data\media\avatars
+		file_server
+	}
+
+	handle {
+		root * C:\eRepository\frontend\dist
+		try_files {path} /index.html
+		file_server
+	}
+}

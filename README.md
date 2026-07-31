@@ -32,7 +32,6 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-set -a && source .env && set +a
 python manage.py migrate
 python manage.py seed_demo
 python manage.py runserver
@@ -55,6 +54,7 @@ Open `http://localhost:5173`. Demo accounts use password `DemoPass!2026`:
 - `master@school.edu` — Master Teacher
 
 The development email backend prints password-change and reset emails in the Django terminal.
+Both backend and frontend load their own `.env` files; `.env.example` files are templates only.
 
 ## Google sign-in setup
 
@@ -81,6 +81,10 @@ cd frontend && npm run lint && npm run build
 
 ## Production notes
 
-Set `DJANGO_DEBUG=False`, a long random `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `CORS_ALLOWED_ORIGINS`, `FRONTEND_URL`, and the Google client ID. Configure SMTP through Django email settings, use PostgreSQL, Redis, and private object storage for documents, serve everything over HTTPS, run malware scanning on uploads, and back up both the database and stored files. Production security flags are enabled automatically when debug mode is off.
+Set `DJANGO_DEBUG=False`, a long random `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `CORS_ALLOWED_ORIGINS`, `FRONTEND_URL`, and the Google client ID. Configure SMTP, use PostgreSQL, serve everything over HTTPS, scan uploads for malware, and back up both the database and stored files. Use a shared cache such as Redis if the backend is expanded to multiple processes or servers. Production security flags are enabled automatically when debug mode is off.
 
 The current SQLite and local-media configuration is intended for development. Document downloads are routed through an authenticated API endpoint; do not expose the media directory directly in production.
+
+For the supported Windows, PostgreSQL, Caddy/HTTPS, GoDaddy DNS, Windows service,
+backup, restore, and update procedure, see
+[`docs/WINDOWS_DEPLOYMENT.md`](docs/WINDOWS_DEPLOYMENT.md).
